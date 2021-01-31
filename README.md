@@ -1,5 +1,7 @@
 Jisui (自炊)
----
+===
+
+This tool is PoC (Proof of Concept).
 
 Jisui is a helper tool to create e-book.  
 Ordinary the scanned book have not text information, so you cannot search text from the PDF.  
