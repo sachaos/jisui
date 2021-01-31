@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"strconv"
 	"strings"
@@ -22,7 +23,7 @@ import (
 
 var (
 	bucket string
-	font   string
+	font   []byte
 	output string
 )
 
@@ -36,8 +37,10 @@ func main() {
 }
 
 func run() error {
+	var fontfile string
+
 	flag.StringVar(&bucket, "bucket", "", "GCS bucket")
-	flag.StringVar(&font, "font", "", "font file (TTF)")
+	flag.StringVar(&fontfile, "font", "", "font file (TTF)")
 	flag.StringVar(&output, "output", "result.pdf", "output file name")
 	flag.Parse()
 	filename := flag.Arg(0)
@@ -50,7 +53,7 @@ func run() error {
 		return fmt.Errorf("invalid argument: please specify -bucket flag")
 	}
 
-	if font == "" {
+	if fontfile == "" {
 		return fmt.Errorf("invalid argument: please specify -font flag")
 	}
 
@@ -59,6 +62,21 @@ func run() error {
 	}
 
 	ctx := context.Background()
+
+	var err error
+
+	fontr, err := os.Open(fontfile)
+	if err != nil {
+		return err
+	}
+	defer fontr.Close()
+
+	fontall, err := ioutil.ReadAll(fontr)
+	if err != nil {
+		return err
+	}
+	font = fontall
+
 	file, err := os.Open(filename)
 	if err != nil {
 		return err
@@ -247,7 +265,7 @@ func integrateWithPDF(pdfr io.ReadSeeker, annotation map[int]*visionpb.TextAnnot
 	sizes := imp.GetPageSizes()
 	nrPages := len(imp.GetPageSizes())
 
-	pdf.AddUTF8Font("font", "", font)
+	pdf.AddUTF8FontFromBytes("font", "", font)
 
 	for i := 1; i <= nrPages; i++ {
 		w := sizes[i]["/MediaBox"]["w"]
