@@ -286,6 +286,11 @@ func integrateWithPDF(pdfr io.ReadSeeker, annotation map[int]*visionpb.TextAnnot
 			continue
 		}
 
+		if i > 1 {
+			tmpl = imp.ImportPageFromStream(pdf, &pdfr, i, "/MediaBox")
+		}
+		imp.UseImportedTemplate(pdf, tmpl, 0, 0, w, h)
+
 		for _, page := range anno.Pages {
 			for _, block := range page.Blocks {
 				for _, paragraph := range block.Paragraphs {
@@ -293,16 +298,13 @@ func integrateWithPDF(pdfr io.ReadSeeker, annotation map[int]*visionpb.TextAnnot
 						minX, minY, _, maxY := extract(word.BoundingBox.NormalizedVertices)
 
 						pdf.SetFont("font", "", (maxY-minY)*h)
+						pdf.SetTextColor(255, 255, 255)
+						pdf.SetAlpha(0, "")
 						pdf.Text(w*minX, h*minY+(maxY-minY)*h, collectWords(word))
 					}
 				}
 			}
 		}
-
-		if i > 1 {
-			tmpl = imp.ImportPageFromStream(pdf, &pdfr, i, "/MediaBox")
-		}
-		imp.UseImportedTemplate(pdf, tmpl, 0, 0, w, h)
 	}
 
 	err := pdf.OutputFileAndClose(result)
