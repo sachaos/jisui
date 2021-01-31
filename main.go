@@ -25,6 +25,7 @@ var (
 	bucket string
 	font   []byte
 	output string
+	ocrResult string
 )
 
 func main() {
@@ -42,6 +43,7 @@ func run() error {
 	flag.StringVar(&bucket, "bucket", "", "GCS bucket")
 	flag.StringVar(&fontfile, "font", "", "font file (TTF)")
 	flag.StringVar(&output, "output", "result.pdf", "output file name")
+	flag.StringVar(&ocrResult, "ocr-result", "", "OCR result prefix")
 	flag.Parse()
 	filename := flag.Arg(0)
 
@@ -83,22 +85,26 @@ func run() error {
 	}
 	defer file.Close()
 
-	endOfGCS := waitingMessage("Uploading PDF file to GCS")
-	bucket, path, err := uploadPDF(ctx, file)
-	if err != nil {
-		return err
-	}
-	endOfGCS()
+	if ocrResult == "" {
+		endOfGCS := waitingMessage("Uploading PDF file to GCS")
+		bucket, path, err := uploadPDF(ctx, file)
+		if err != nil {
+			return err
+		}
+		endOfGCS()
 
-	endOfOCR := waitingMessage("Executing OCR")
-	err = ocrPDF(ctx, bucket, path, bucket, path+"/output")
-	if err != nil {
-		return err
+		ocrResult = path+"/output"
+
+		endOfOCR := waitingMessage("Executing OCR")
+		err = ocrPDF(ctx, bucket, path, bucket, ocrResult)
+		if err != nil {
+			return err
+		}
+		endOfOCR()
 	}
-	endOfOCR()
 
 	endOfDL := waitingMessage("Downloading OCR results")
-	responses, err := downloadResponse(ctx, bucket, path+"/output")
+	responses, err := downloadResponse(ctx, bucket, ocrResult)
 	if err != nil {
 		return err
 	}
@@ -270,11 +276,15 @@ func integrateWithPDF(pdfr io.ReadSeeker, annotation map[int]*visionpb.TextAnnot
 	for i := 1; i <= nrPages; i++ {
 		w := sizes[i]["/MediaBox"]["w"]
 		h := sizes[i]["/MediaBox"]["h"]
-		anno := annotation[i]
 		pdf.AddPageFormat("P", gofpdf.SizeType{
 			Wd: w,
 			Ht: h,
 		})
+
+		anno, ok := annotation[i]
+		if !ok || anno == nil {
+			continue
+		}
 
 		for _, page := range anno.Pages {
 			for _, block := range page.Blocks {
