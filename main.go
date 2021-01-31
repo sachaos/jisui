@@ -65,21 +65,21 @@ func run() error {
 	}
 	defer file.Close()
 
-	endOfGCS := waitingMessage("waiting for GCS")
+	endOfGCS := waitingMessage("Uploading PDF file to GCS")
 	bucket, path, err := uploadPDF(ctx, file)
 	if err != nil {
 		return err
 	}
 	endOfGCS()
 
-	endOfOCR := waitingMessage("waiting for OCR")
+	endOfOCR := waitingMessage("Executing OCR")
 	err = ocrPDF(ctx, bucket, path, bucket, path+"/output")
 	if err != nil {
 		return err
 	}
 	endOfOCR()
 
-	endOfDL := waitingMessage("waiting for Downloading output")
+	endOfDL := waitingMessage("Downloading OCR results")
 	responses, err := downloadResponse(ctx, bucket, path+"/output")
 	if err != nil {
 		return err
@@ -92,12 +92,15 @@ func run() error {
 	}
 	defer file2.Close()
 
-	endOfConvert := waitingMessage("annotating")
+	endOfConvert := waitingMessage("Merging results to PDF")
 	err = integrateWithPDF(file2, collectAnnotations(responses), output)
 	if err != nil {
 		return err
 	}
 	endOfConvert()
+
+	fmt.Println("")
+	fmt.Println("Complete!")
 
 	return nil
 }
@@ -213,19 +216,18 @@ func downloadResponse(ctx context.Context, bucket, prefix string) ([]*visionpb.A
 	return responses, err
 }
 
-func waitingMessage(message string) func() {
-	var msg string
-	msg = message[:]
+func waitingMessage(task string) func() {
 	done := make(chan struct{})
 	go func() {
 		s := spin.New()
+		s.Set(spin.Spin1)
 		for {
 			select {
 			case <-done:
-				fmt.Printf("\r  %s [done]\n", msg)
+				fmt.Printf("\r- %s [done]\n", task)
 				return
 			default:
-				fmt.Printf("\r%s %s", s.Next(), msg)
+				fmt.Printf("\r%s %s", s.Next(), task)
 				time.Sleep(100 * time.Millisecond)
 			}
 		}
@@ -233,6 +235,7 @@ func waitingMessage(message string) func() {
 
 	return func() {
 		close(done)
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 
