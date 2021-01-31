@@ -1,47 +1,44 @@
 package main
 
 import (
+	"context"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+
 	"cloud.google.com/go/storage"
 	vision "cloud.google.com/go/vision/apiv1"
-	"flag"
 	"github.com/golang/protobuf/jsonpb"
 	"github.com/phpdave11/gofpdf"
 	"github.com/phpdave11/gofpdf/contrib/gofpdi"
 	"github.com/tj/go-spin"
 	"google.golang.org/api/iterator"
 	visionpb "google.golang.org/genproto/googleapis/cloud/vision/v1"
-	"io"
-	"strconv"
-	"strings"
-	"time"
-
-	"context"
-	"fmt"
-	"os"
 )
 
-var bucket string
+var (
+	bucket string
+	font   string
+	output string
+)
 
 func main() {
 	err := run()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
+		flag.Usage()
 		os.Exit(1)
 	}
 }
 
-func collectAnnotations(responses []*visionpb.AnnotateFileResponse) map[int]*visionpb.TextAnnotation {
-	annotations := map[int]*visionpb.TextAnnotation{}
-	for _, response := range responses {
-		for _, res := range response.Responses {
-			annotations[int(res.Context.PageNumber)] = res.FullTextAnnotation
-		}
-	}
-	return annotations
-}
-
 func run() error {
 	flag.StringVar(&bucket, "bucket", "", "GCS bucket")
+	flag.StringVar(&font, "font", "", "font file (TTF)")
+	flag.StringVar(&output, "output", "result.pdf", "output file name")
 	flag.Parse()
 	filename := flag.Arg(0)
 
@@ -51,6 +48,14 @@ func run() error {
 
 	if bucket == "" {
 		return fmt.Errorf("invalid argument: please specify -bucket flag")
+	}
+
+	if font == "" {
+		return fmt.Errorf("invalid argument: please specify -font flag")
+	}
+
+	if output == "" {
+		return fmt.Errorf("invalid argument: please specify -output flag")
 	}
 
 	ctx := context.Background()
@@ -68,14 +73,14 @@ func run() error {
 	endOfGCS()
 
 	endOfOCR := waitingMessage("waiting for OCR")
-	err = ocrPDF(ctx, bucket, path, bucket, path+"/result")
+	err = ocrPDF(ctx, bucket, path, bucket, path+"/output")
 	if err != nil {
 		return err
 	}
 	endOfOCR()
 
-	endOfDL := waitingMessage("waiting for Downloading result")
-	responses, err := downloadResponse(ctx, bucket, path+"/result")
+	endOfDL := waitingMessage("waiting for Downloading output")
+	responses, err := downloadResponse(ctx, bucket, path+"/output")
 	if err != nil {
 		return err
 	}
@@ -88,13 +93,23 @@ func run() error {
 	defer file2.Close()
 
 	endOfConvert := waitingMessage("annotating")
-	err = integrateWithPDF(file2, collectAnnotations(responses))
+	err = integrateWithPDF(file2, collectAnnotations(responses), output)
 	if err != nil {
 		return err
 	}
 	endOfConvert()
 
 	return nil
+}
+
+func collectAnnotations(responses []*visionpb.AnnotateFileResponse) map[int]*visionpb.TextAnnotation {
+	annotations := map[int]*visionpb.TextAnnotation{}
+	for _, response := range responses {
+		for _, res := range response.Responses {
+			annotations[int(res.Context.PageNumber)] = res.FullTextAnnotation
+		}
+	}
+	return annotations
 }
 
 func uploadPDF(ctx context.Context, r io.Reader) (string, string, error) {
@@ -194,7 +209,7 @@ func downloadResponse(ctx context.Context, bucket, prefix string) ([]*visionpb.A
 
 		responses = append(responses, &data)
 	}
-	
+
 	return responses, err
 }
 
@@ -221,7 +236,7 @@ func waitingMessage(message string) func() {
 	}
 }
 
-func integrateWithPDF(pdfr io.ReadSeeker, annotation map[int]*visionpb.TextAnnotation) error {
+func integrateWithPDF(pdfr io.ReadSeeker, annotation map[int]*visionpb.TextAnnotation, result string) error {
 	pdf := gofpdf.New("P", "pt", "A4", "")
 
 	imp := gofpdi.NewImporter()
@@ -229,7 +244,7 @@ func integrateWithPDF(pdfr io.ReadSeeker, annotation map[int]*visionpb.TextAnnot
 	sizes := imp.GetPageSizes()
 	nrPages := len(imp.GetPageSizes())
 
-	pdf.AddUTF8Font("ipa", "", "./ipaexg.ttf")
+	pdf.AddUTF8Font("font", "", font)
 
 	for i := 1; i <= nrPages; i++ {
 		w := sizes[i]["/MediaBox"]["w"]
@@ -245,11 +260,9 @@ func integrateWithPDF(pdfr io.ReadSeeker, annotation map[int]*visionpb.TextAnnot
 				for _, paragraph := range block.Paragraphs {
 					for _, word := range paragraph.Words {
 						minX, minY, _, maxY := extract(word.BoundingBox.NormalizedVertices)
-						pdf.SetFillColor(200, 700, 220)
-						//pdf.Rect(w * minX, h * minY, (maxX - minX) * w, (maxY - minY) * h, "F")
 
-						pdf.SetFont("ipa", "", (maxY - minY) * h)
-						pdf.Text(w * minX, h * minY + (maxY - minY) * h, collectWords(word))
+						pdf.SetFont("font", "", (maxY-minY)*h)
+						pdf.Text(w*minX, h*minY+(maxY-minY)*h, collectWords(word))
 					}
 				}
 			}
@@ -261,7 +274,7 @@ func integrateWithPDF(pdfr io.ReadSeeker, annotation map[int]*visionpb.TextAnnot
 		imp.UseImportedTemplate(pdf, tmpl, 0, 0, w, h)
 	}
 
-	err := pdf.OutputFileAndClose("result.pdf")
+	err := pdf.OutputFileAndClose(result)
 	if err != nil {
 		return err
 	}
@@ -300,32 +313,6 @@ func collectWords(word *visionpb.Word) string {
 	b := strings.Builder{}
 	for _, symbol := range word.Symbols {
 		b.WriteString(symbol.Text)
-	}
-
-	return b.String()
-}
-
-func collectWordsParagraph(paragraph *visionpb.Paragraph) []string {
-	words := make([]string, len(paragraph.Words))
-	for i, word := range paragraph.Words {
-		b := strings.Builder{}
-		for _, symbol := range word.Symbols {
-			b.WriteString(symbol.Text)
-		}
-		words[i] = b.String()
-	}
-
-	return words
-}
-
-func collectWordsBlock(block *visionpb.Block) string {
-	b := strings.Builder{}
-	for _, paragraph := range block.Paragraphs {
-		for _, word := range paragraph.Words {
-			for _, symbol := range word.Symbols {
-				b.WriteString(symbol.Text)
-			}
-		}
 	}
 
 	return b.String()
