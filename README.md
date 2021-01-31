@@ -1,4 +1,4 @@
-Jisui
+Jisui (自炊)
 ---
 
 Jisui is a helper tool to create e-book.  
@@ -14,7 +14,13 @@ So you need GCP account & own project.
 
 * GCS bucket
 * GCP credential file
-* Font file
+* Font file e.g. https://moji.or.jp/ipafont/
+
+## Install
+
+```
+$ go get github.com/sachaos/jisui
+```
 
 ## Usage
 
@@ -22,8 +28,15 @@ So you need GCP account & own project.
 $ jisui -bucket [your GCS bucket] -font [Downloaded font] -output result.pdf [scanned PDF file]
 ```
 
-## Install
+## Example
 
-```
-$ go get github.com/sachaos/jisui
-```
+You can see example PDF file.
+
+Please download and open it in PDF viewer.
+
+You can recongnize the difference when you search text.
+
+* [Scanned image PDF](./example/scanned.pdf)
+* [Processed PDF](./example/result.pdf)
+
+![image](./image/example.png)
